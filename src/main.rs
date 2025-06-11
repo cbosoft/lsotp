@@ -3,7 +3,6 @@ mod totp;
 use std::{collections::HashMap, env, fs::OpenOptions, path::PathBuf};
 
 use copypasta::{x11_clipboard::{Clipboard, X11ClipboardContext}, ClipboardContext, ClipboardProvider};
-use notify_rust::{Notification, Timeout};
 use serde::{Serialize, Deserialize};
 use clap::{Parser, Subcommand};
 use totp::sane_totp;
@@ -76,12 +75,11 @@ fn main() {
             let otp = cfg.get(profile);
             //let mut ctx = X11ClipboardContext::<Clipboard>::new().expect("failed to get clipboard context");
             //ctx.set_contents(otp).expect("failed to set clipboard!");
-            eprintln!("{otp}");
-            Notification::new()
-                .summary("LSOTP")
-                .body(&format!("{otp}"))
-                .timeout(Timeout::Never)
-                .show().expect("failed to show notification");
+            if atty::is(atty::Stream::Stdout) {
+                println!("{otp}");
+            } else {
+              print!("{otp}");
+            }
         }
         Command::Add { profile, secret } => {
             cfg.add(profile, secret);
