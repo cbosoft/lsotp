@@ -1,8 +1,9 @@
 mod totp;
 
-use std::{collections::HashMap, env, fs::OpenOptions, path::PathBuf};
+use std::{collections::HashMap, env, fs::OpenOptions, path::PathBuf, time::Duration};
 
-use copypasta::{x11_clipboard::{Clipboard, X11ClipboardContext}, ClipboardContext, ClipboardProvider};
+use qrism::reader::detect_qr;
+use arboard::Clipboard;
 use serde::{Serialize, Deserialize};
 use clap::{Parser, Subcommand};
 use totp::sane_totp;
@@ -22,6 +23,10 @@ enum Command {
     Add {
         profile: String,
         secret: String
+    },
+    Import {
+        profile: String,
+        path: PathBuf,
     }
 }
 
@@ -55,6 +60,29 @@ impl Config {
         self.profiles.insert(profile, secret);
     }
 
+    pub fn import(&mut self, profile: String, qr_path: PathBuf) {
+        if self.profiles.contains_key(&profile) {
+            eprintln!("Profile with name '{profile}' already exists; not overwriting.");
+            return;
+        }
+
+        let img = image::open(qr_path).expect("could not read provided image!");
+        let mut res = detect_qr(&img);
+        let symbol = res.symbols().first_mut().expect("could not read any data from QR");
+        let (_, url) = symbol.decode().expect("found nothing in image");
+        let (_, query) = url.split_once('?').expect("message is not in correct format");
+        let mut secret = String::new();
+        for kv in query.split('&') {
+            if let Some((k, v)) = kv.split_once('=') {
+                if k == "secret" {
+                    secret = v.into();
+                }
+            }
+        }
+        println!("Added new profile '{profile}' successfully!");
+        self.profiles.insert(profile, secret);
+    }
+
     pub fn save(&self) {
         let p = Self::get_path();
         let f = OpenOptions::new().write(true).truncate(true).create(true).open(p).expect("failed to open config file for writing!");
@@ -73,16 +101,25 @@ fn main() {
     match args.command {
         Command::Get { profile } => {
             let otp = cfg.get(profile);
-            //let mut ctx = X11ClipboardContext::<Clipboard>::new().expect("failed to get clipboard context");
-            //ctx.set_contents(otp).expect("failed to set clipboard!");
             if atty::is(atty::Stream::Stdout) {
-                println!("{otp}");
+                if let Ok(mut clip) = Clipboard::new() {
+                    clip.set_text(otp).expect("failed to set clipboard!");
+                    std::thread::sleep(Duration::from_millis(500));
+                    println!("OTP is in clipboard");
+                }
+                else {
+                    println!("{otp}");
+                }
             } else {
               print!("{otp}");
             }
-        }
+        },
         Command::Add { profile, secret } => {
             cfg.add(profile, secret);
+            cfg.save();
+        },
+        Command::Import { profile, path } => {
+            cfg.import(profile, path);
             cfg.save();
         }
     }
